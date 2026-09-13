@@ -1,34 +1,11 @@
-# ==============================================================================
-# Transposon small-RNA targeting visualization
-# ==============================================================================
+# small-RNA targeting along transposable-element consensus sequences
 #
-# Purpose:
-#   Visualize small-RNA coverage along transposable-element (TE) consensus
-#   sequences.
+# sense reads are plotted above zero
+# antisense reads are plotted below zero
 #
-#   Sense reads are plotted above zero.
-#   Antisense reads are plotted below zero.
-#
-#   Coverage is normalized using a user-provided normalization coefficient
-#   (for example, normalization to 1 million miRNA reads).
-#
-# Workflow:
-#   1. Read small-RNA alignments.
-#   2. Select reads mapping to a TE.
-#   3. Calculate sense and antisense coverage along the TE.
-#   4. Normalize coverage.
-#   5. Average coverage in fixed-size windows.
-#   6. Compare targeting profiles between libraries.
-#
-# IMPORTANT:
-#   No private/local paths are included in this script.
-#   Set your own paths in the USER SETTINGS section.
-# ==============================================================================
+# coverage is normalized with sample-specific coefficients and
+# averaged in fixed-size windows
 
-
-# ==============================================================================
-# 1. Packages
-# ==============================================================================
 
 library(Biostrings)
 library(Rsamtools)
@@ -36,25 +13,23 @@ library(IRanges)
 library(ggplot2)
 
 
-# ==============================================================================
-# 2. USER SETTINGS
-# ==============================================================================
+# ------------------------------------------------------------------
+# Input files
+# ------------------------------------------------------------------
 
-# Directory containing mapped small-RNA alignment files.
+# folder with mapped small-RNA files
 ALIGNMENT_DIR <- "/path/to/alignment/files"
 
-# FASTA file containing TE consensus sequences.
+# TE consensus FASTA
 TE_LIBRARY_FILE <- "/path/to/TE_library.fasta"
 
-# Directory where plots should be saved.
+# output folder
 OUTPUT_DIR <- "/path/to/output"
 
-
-# Size of the windows used to smooth coverage.
+# window size for coverage smoothing
 WINDOW_SIZE <- 100
 
 
-# Create output directory if necessary.
 dir.create(
   OUTPUT_DIR,
   recursive = TRUE,
@@ -62,14 +37,12 @@ dir.create(
 )
 
 
-# ==============================================================================
-# 3. SAMPLE INFORMATION
-# ==============================================================================
+# ------------------------------------------------------------------
+# Samples
+# ------------------------------------------------------------------
 
-# Define alignment files, display names and normalization coefficients.
-#
-# The normalization coefficient should correspond to the normalization strategy
-# used for the experiment (for example, reads per 1 million miRNA reads).
+# normalization coefficients correspond to the normalization used
+# for each small-RNA library
 
 samples <- data.frame(
 
@@ -109,16 +82,15 @@ samples <- data.frame(
 )
 
 
-# Construct full file paths.
 samples$path <- file.path(
   ALIGNMENT_DIR,
   samples$file
 )
 
 
-# ==============================================================================
-# 4. LOAD TE LIBRARY
-# ==============================================================================
+# ------------------------------------------------------------------
+# TE library
+# ------------------------------------------------------------------
 
 TE_library <- readDNAStringSet(
   TE_LIBRARY_FILE
@@ -132,14 +104,11 @@ cat(
 )
 
 
-# ==============================================================================
-# 5. HELPER FUNCTION: CONVERT BAM TO DATA FRAME
-# ==============================================================================
+# ------------------------------------------------------------------
+# BAM helper functions
+# ------------------------------------------------------------------
 
-# scanBam() returns a nested list.
-# This helper preserves factor levels while converting the output into
-# a standard R data frame.
-
+# scanBam() returns lists; this keeps factor levels intact
 .unlist <- function(x) {
 
   x1 <- x[[1L]]
@@ -162,9 +131,11 @@ cat(
 }
 
 
+# convert BAM data to a regular data frame
 bam_to_df <- function(path) {
 
   if (!file.exists(path)) {
+
     stop(
       paste(
         "Alignment file not found:",
@@ -174,7 +145,7 @@ bam_to_df <- function(path) {
   }
 
 
-  # Only fields required for the coverage analysis are loaded.
+  # only load fields needed for the coverage analysis
   param <- ScanBamParam(
     what = c(
       "qname",
@@ -225,25 +196,13 @@ bam_to_df <- function(path) {
   ) <- bam_fields
 
 
-  bam_df <- data.frame(
-    bam_df
-  )
-
-
-  return(
+  data.frame(
     bam_df
   )
 }
 
 
-# ==============================================================================
-# 6. LOAD ALIGNMENT FILES
-# ==============================================================================
-
-# Load every small-RNA library once.
-#
-# The resulting list can then be reused for any number of TEs.
-
+# load all libraries once
 bam_data <- setNames(
 
   lapply(
@@ -255,19 +214,16 @@ bam_data <- setNames(
 )
 
 
-# ==============================================================================
-# 7. EXTRACT READ COPY NUMBER
-# ==============================================================================
+# ------------------------------------------------------------------
+# Read counts
+# ------------------------------------------------------------------
 
-# In this dataset, collapsed reads contain their abundance in the read name.
+# collapsed reads contain their abundance in the read name
 #
-# Example:
+# example:
+# read_name=25:...
 #
-#   read_name=25:...
-#
-# means that the sequence represents 25 reads.
-#
-# If no count is encoded in the read name, the read is treated as one read.
+# if no count is present, the read is counted as 1
 
 extract_read_count <- function(qname) {
 
@@ -308,7 +264,6 @@ extract_read_count <- function(qname) {
   )
 
 
-  # If a count cannot be parsed, use one read.
   encoded_count[
     is.na(encoded_count)
   ] <- 1
@@ -325,9 +280,9 @@ extract_read_count <- function(qname) {
 }
 
 
-# ==============================================================================
-# 8. CALCULATE SMALL-RNA COVERAGE ALONG ONE TE
-# ==============================================================================
+# ------------------------------------------------------------------
+# Coverage along one TE
+# ------------------------------------------------------------------
 
 calculate_te_coverage <- function(
     TE_name,
@@ -336,10 +291,7 @@ calculate_te_coverage <- function(
     window_size = 100
 ) {
 
-  # ---------------------------------------------------------------------------
-  # Check input
-  # ---------------------------------------------------------------------------
-
+  # check TE name
   if (!TE_name %in% names(TE_library)) {
 
     stop(
@@ -359,10 +311,7 @@ calculate_te_coverage <- function(
   }
 
 
-  # ---------------------------------------------------------------------------
-  # Determine TE length
-  # ---------------------------------------------------------------------------
-
+  # TE length
   TE_index <- match(
     TE_name,
     names(TE_library)
@@ -374,10 +323,7 @@ calculate_te_coverage <- function(
   )[TE_index]
 
 
-  # ---------------------------------------------------------------------------
-  # Select reads mapping to the TE
-  # ---------------------------------------------------------------------------
-
+  # reads mapping to this TE
   intervals <- bam_df[
     as.character(bam_df$rname) == TE_name,
     ,
@@ -385,7 +331,7 @@ calculate_te_coverage <- function(
   ]
 
 
-  # If no reads map to this TE, return zero coverage.
+  # return zero coverage if there are no mapped reads
   if (nrow(intervals) == 0) {
 
     positions <- seq_len(
@@ -434,19 +380,13 @@ calculate_te_coverage <- function(
   }
 
 
-  # ---------------------------------------------------------------------------
-  # Extract abundance of collapsed reads
-  # ---------------------------------------------------------------------------
-
+  # get abundance of collapsed reads
   intervals$count <- extract_read_count(
     intervals$qname
   )
 
 
-  # ---------------------------------------------------------------------------
-  # Calculate alignment coordinates
-  # ---------------------------------------------------------------------------
-
+  # alignment coordinates
   intervals$start <- as.integer(
     intervals$pos
   )
@@ -459,7 +399,7 @@ calculate_te_coverage <- function(
   )
 
 
-  # Ensure coordinates do not extend outside the TE consensus sequence.
+  # keep coordinates inside the TE consensus
   intervals$start <- pmax(
     1,
     intervals$start
@@ -472,7 +412,6 @@ calculate_te_coverage <- function(
   )
 
 
-  # Remove invalid intervals.
   intervals <- intervals[
     !is.na(intervals$start) &
       !is.na(intervals$end) &
@@ -482,10 +421,7 @@ calculate_te_coverage <- function(
   ]
 
 
-  # ---------------------------------------------------------------------------
-  # Calculate strand-specific coverage
-  # ---------------------------------------------------------------------------
-
+  # calculate coverage separately for each strand
   calculate_strand <- function(strand_value) {
 
     x <- intervals[
@@ -504,27 +440,20 @@ calculate_te_coverage <- function(
 
 
     ranges <- IRanges(
-
       start = x$start,
-
       end = x$end
     )
 
 
     coverage_vector <- coverage(
-
       ranges,
-
       weight = x$count,
-
       width = TE_length
     )
 
 
-    return(
-      as.numeric(
-        coverage_vector
-      )
+    as.numeric(
+      coverage_vector
     )
   }
 
@@ -539,10 +468,7 @@ calculate_te_coverage <- function(
   )
 
 
-  # ---------------------------------------------------------------------------
-  # Build long-format coverage table
-  # ---------------------------------------------------------------------------
-
+  # combine sense and antisense coverage
   coverage_data <- data.frame(
 
     position = rep(
@@ -565,27 +491,22 @@ calculate_te_coverage <- function(
   )
 
 
-  # Normalize coverage.
+  # normalize coverage
   coverage_data$value <- (
     coverage_data$value /
     normalization
   )
 
 
-  # ---------------------------------------------------------------------------
-  # Average coverage in fixed-size windows
-  # ---------------------------------------------------------------------------
-
-  # Window 1 = positions 1-100
-  # Window 2 = positions 101-200
-  # etc.
-
+  # 100-bp windows:
+  # 1-100, 101-200, 201-300, ...
   coverage_data$window <- ceiling(
     coverage_data$position /
       window_size
   )
 
 
+  # average coverage within each window
   coverage_summary <- aggregate(
 
     cbind(
@@ -605,9 +526,9 @@ calculate_te_coverage <- function(
 }
 
 
-# ==============================================================================
-# 9. PLOT ONE TE ACROSS MULTIPLE LIBRARIES
-# ==============================================================================
+# ------------------------------------------------------------------
+# Plot one TE
+# ------------------------------------------------------------------
 
 plot_te_targeting <- function(
     TE_name,
@@ -616,7 +537,7 @@ plot_te_targeting <- function(
     show_legend = TRUE
 ) {
 
-  # Check that requested sample names exist.
+  # check sample names
   if (!all(sample_ids %in% samples$sample)) {
 
     stop(
@@ -668,10 +589,6 @@ plot_te_targeting <- function(
   )
 
 
-  # ---------------------------------------------------------------------------
-  # Plot
-  # ---------------------------------------------------------------------------
-
   p <- ggplot(
 
     summary_data,
@@ -697,7 +614,6 @@ plot_te_targeting <- function(
     theme_bw() +
 
     labs(
-
       title = paste(
         "TE:",
         TE_name
@@ -717,7 +633,6 @@ plot_te_targeting <- function(
     ) +
 
     theme(
-
       text = element_text(
         size = 12
       ),
@@ -731,7 +646,6 @@ plot_te_targeting <- function(
   if (!show_legend) {
 
     p <- p +
-
       theme(
         legend.position = "none"
       )
@@ -744,9 +658,9 @@ plot_te_targeting <- function(
 }
 
 
-# ==============================================================================
-# 10. EXAMPLE: CONTROL VERSUS PANX KD
-# ==============================================================================
+# ------------------------------------------------------------------
+# Example: control vs Panx KD
+# ------------------------------------------------------------------
 
 plot_te_targeting(
 
@@ -759,9 +673,9 @@ plot_te_targeting(
 )
 
 
-# ==============================================================================
-# 11. EXAMPLE: COMPARE ALL LIBRARIES FOR ONE TE
-# ==============================================================================
+# ------------------------------------------------------------------
+# Example: compare all libraries for Stalker
+# ------------------------------------------------------------------
 
 Stalker_plot <- plot_te_targeting(
 
@@ -782,8 +696,6 @@ print(
 )
 
 
-# Save single-TE plot.
-
 ggsave(
 
   filename = file.path(
@@ -794,16 +706,14 @@ ggsave(
   plot = Stalker_plot,
 
   width = 9,
-
   height = 6,
-
   units = "in"
 )
 
 
-# ==============================================================================
-# 12. LIST OF TRANSPOSONS TO VISUALIZE
-# ==============================================================================
+# ------------------------------------------------------------------
+# TE list
+# ------------------------------------------------------------------
 
 TE_LIST <- c(
 
@@ -855,17 +765,11 @@ TE_LIST <- c(
 )
 
 
-# ==============================================================================
-# 13. CREATE MULTI-PAGE PDF FOR MANY TEs
-# ==============================================================================
+# ------------------------------------------------------------------
+# Plot many TEs
+# ------------------------------------------------------------------
 
-# Instead of manually creating obj1, obj2, obj3, ...,
-# loop over the TE list.
-#
-# Each TE is written to a separate page of the PDF.
-#
-# This is much easier to inspect than one extremely tall figure.
-
+# one TE per page
 pdf(
 
   file = file.path(
@@ -874,15 +778,13 @@ pdf(
   ),
 
   width = 8,
-
   height = 5
 )
 
 
 for (TE_name in TE_LIST) {
 
-
-  # Skip TE names that are absent from the FASTA library.
+  # skip TEs that are not present in the FASTA
   if (!TE_name %in% names(TE_library)) {
 
     warning(
@@ -916,12 +818,9 @@ for (TE_name in TE_LIST) {
 dev.off()
 
 
-# ==============================================================================
-# 14. OPTIONAL: ALL LIBRARIES FOR A SELECTED SET OF TEs
-# ==============================================================================
-
-# For example, compare Control, Panx, Piwi and Nxf2 depletion
-# for selected elements.
+# ------------------------------------------------------------------
+# Selected TEs with all libraries
+# ------------------------------------------------------------------
 
 SELECTED_TES <- c(
   "Stalker",
@@ -940,13 +839,11 @@ pdf(
   ),
 
   width = 9,
-
   height = 6
 )
 
 
 for (TE_name in SELECTED_TES) {
-
 
   if (!TE_name %in% names(TE_library)) {
 
@@ -982,8 +879,3 @@ for (TE_name in SELECTED_TES) {
 
 
 dev.off()
-
-
-# ==============================================================================
-# End of script
-# ==============================================================================
