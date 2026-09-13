@@ -1,23 +1,16 @@
-# ==============================================================================
 # qPCR plotting
-# ==============================================================================
-#
 # Expected columns:
-#   TE         = gene / transposable element
-#   treatment  = experimental condition
-#   value      = relative expression / ddCt
+# TE = gene / transposable element
+# treatment = experimental condition
+# value = relative expression / ddCt
 #
 # Optional:
-#   experiment = experiment name, used for faceting
-# ==============================================================================
+# experiment = experiment name, used for faceting
 
 library(ggplot2)
 
 
-# ------------------------------------------------------------------------------
-# Reusable plotting function
-# ------------------------------------------------------------------------------
-
+# reusable plotting function
 plot_qpcr <- function(data,
                       title = NULL,
                       y_label = "Relative expression",
@@ -50,7 +43,7 @@ plot_qpcr <- function(data,
       legend.position = "bottom"
     )
   
-  # If several experiments are present, plot each experiment separately.
+  # split by experiment if this column is present
   if (facet && "experiment" %in% names(data)) {
     p <- p +
       facet_wrap(
@@ -63,9 +56,9 @@ plot_qpcr <- function(data,
 }
 
 
-# ==============================================================================
-# Example 1: MAEL rescue experiment
-# ==============================================================================
+# ------------------------------------------------------------------
+# MAEL rescue experiment
+# ------------------------------------------------------------------
 
 treatments_mael <- c(
   "Luc siRNA + EV",
@@ -77,6 +70,7 @@ treatments_mael <- c(
   "Mael siSiomi + dMAEL (mut) #2",
   "Mael siSiomi + EV"
 )
+
 
 qPCR_mael <- data.frame(
   
@@ -120,9 +114,9 @@ plot_qpcr(
 )
 
 
-# ==============================================================================
-# Example 2: Gtsf1 rescue experiment
-# ==============================================================================
+# ------------------------------------------------------------------
+# Gtsf1 rescue experiment
+# ------------------------------------------------------------------
 
 treatments_gtsf1 <- c(
   "Control KD + EV",
@@ -132,6 +126,7 @@ treatments_gtsf1 <- c(
   "Gtsf1 KD + delta C-term rescue [141-end]",
   "Gtsf1 KD + R14D K15D K16D R25D rescue"
 )
+
 
 qPCR_gtsf1 <- data.frame(
   
@@ -175,8 +170,7 @@ qPCR_gtsf1 <- data.frame(
 )
 
 
-# Example: remove a housekeeping/control gene from the figure.
-
+# remove Act5C from the plot
 qPCR_gtsf1_plot <- subset(
   qPCR_gtsf1,
   TE != "Act5C"
@@ -190,9 +184,9 @@ plot_qpcr(
 )
 
 
-# ==============================================================================
-# Example 3: comparison between Piwi, Mael and Gtsf1 experiments
-# ==============================================================================
+# ------------------------------------------------------------------
+# Piwi, Mael and Gtsf1 comparison
+# ------------------------------------------------------------------
 
 treatments_comparison <- c(
   "Control KD (Piwi exp) + EV",
