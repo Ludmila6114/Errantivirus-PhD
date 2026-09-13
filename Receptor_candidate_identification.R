@@ -1,76 +1,34 @@
-# ==============================================================================
-# Drosophila ovary protein candidate selection for protein-interaction screening
-# ==============================================================================
+# Drosophila ovary protein candidate selection
 #
-# Purpose:
-#
-#   1. Identify genes expressed in Drosophila ovaries using RNA-seq TPM values.
-#   2. Prioritize expressed proteins associated with:
-#        - transmembrane domains
-#        - membrane-related GO terms
-#        - receptor-related GO terms
-#   3. Convert selected genes to UniProt identifiers.
-#   4. Generate a UniProt ID list for the complete Drosophila proteome.
-#
-# Inputs:
-#
-#   - Salmon gene-level quantification files from biological replicates
-#   - BioMart annotation table containing:
-#         Gene.name
-#         GO.term.name
-#         Transmembrane.helices
-#   - Drosophila protein FASTA file containing FlyBase and UniProt annotations
-#
-# IMPORTANT:
-#   No local/private paths are included in this script.
-#   Replace the paths in the USER SETTINGS section with your own.
-# ==============================================================================
+# Find genes expressed in ovary, prioritize membrane/TM/receptor proteins,
+# and convert the selected genes to UniProt IDs.
 
-
-# ==============================================================================
-# 1. Packages
-# ==============================================================================
 
 library(Biostrings)
 
-
-# ==============================================================================
-# 2. USER SETTINGS
-# ==============================================================================
-
-# RNA-seq quantification files.
+# Input files
 QUANT_FILES <- c(
   "/path/to/replicate1.sf",
   "/path/to/replicate2.sf",
   "/path/to/replicate3.sf"
 )
 
-# BioMart annotation table.
 GO_ANNOTATION_FILE <- "/path/to/mart_export.csv"
-
-# Drosophila translated proteome FASTA.
 PROTEOME_FASTA <- "/path/to/dmel_proteome.fasta"
 
-# Directory for output files.
 OUTPUT_DIR <- "/path/to/output"
 
 
-# Expression threshold.
+# expression cutoff
 TPM_THRESHOLD <- 1
 
-
-# Minimum number of replicates in which a gene must pass the TPM threshold.
-#
-# 1 = expressed in at least one replicate
-# 2 = expressed in at least two replicates
-# 3 = expressed in all three replicates
-#
-# Setting this to 1 reproduces the logic of the original analysis.
-
+# number of replicates in which a gene must pass the TPM cutoff
+# 1 = at least one replicate
+# 2 = at least two replicates
+# 3 = all three replicates
 MIN_REPLICATES <- 1
 
 
-# Create output directory if necessary.
 dir.create(
   OUTPUT_DIR,
   recursive = TRUE,
@@ -78,23 +36,14 @@ dir.create(
 )
 
 
-# ==============================================================================
-# 3. READ RNA-SEQ QUANTIFICATION FILES
-# ==============================================================================
+# RNA-seq data
+# ------------------------------------------------------------------
 
-# Salmon quantification files normally contain:
-#
-#   Name
-#   Length
-#   EffectiveLength
-#   TPM
-#   NumReads
-#
-# This helper extracts only the gene name and TPM columns.
-
+# read Salmon quantification file and keep gene name + TPM
 read_quantification <- function(path) {
 
   if (!file.exists(path)) {
+
     stop(
       paste(
         "Quantification file not found:",
@@ -113,6 +62,7 @@ read_quantification <- function(path) {
 
 
   if (!"TPM" %in% colnames(x)) {
+
     stop(
       paste(
         "No TPM column found in:",
@@ -122,7 +72,6 @@ read_quantification <- function(path) {
   }
 
 
-  # The first column contains the gene identifier.
   gene_column <- colnames(x)[1]
 
 
@@ -134,19 +83,14 @@ read_quantification <- function(path) {
 }
 
 
-# Read all biological replicates.
+# read all replicates
 quant_data <- lapply(
   QUANT_FILES,
   read_quantification
 )
 
 
-# ==============================================================================
-# 4. IDENTIFY GENES EXPRESSED IN THE OVARY
-# ==============================================================================
-
-# Determine which genes have TPM >= threshold in each replicate.
-
+# genes above the TPM cutoff in each replicate
 expressed_per_replicate <- lapply(
 
   quant_data,
@@ -156,15 +100,14 @@ expressed_per_replicate <- lapply(
     unique(
       x$gene[
         !is.na(x$TPM) &
-        x$TPM >= TPM_THRESHOLD
+          x$TPM >= TPM_THRESHOLD
       ]
     )
   }
 )
 
 
-# Count in how many replicates each gene passes the TPM threshold.
-
+# count in how many replicates each gene is expressed
 expression_counts <- table(
   unlist(
     expressed_per_replicate
@@ -172,8 +115,7 @@ expression_counts <- table(
 )
 
 
-# Keep genes passing the threshold in the requested number of replicates.
-
+# keep genes passing the cutoff in enough replicates
 expressed_genes <- names(
   expression_counts[
     expression_counts >= MIN_REPLICATES
@@ -188,9 +130,8 @@ cat(
 )
 
 
-# ==============================================================================
-# 5. LOAD BIOMART / GO ANNOTATIONS
-# ==============================================================================
+# GO / BioMart annotation
+# ------------------------------------------------------------------
 
 go <- read.csv(
   GO_ANNOTATION_FILE,
@@ -199,8 +140,7 @@ go <- read.csv(
 )
 
 
-# Columns expected from the original BioMart export.
-
+# columns expected in the BioMart table
 required_columns <- c(
   "Gene.name",
   "GO.term.name",
@@ -228,8 +168,7 @@ if (length(missing_columns) > 0) {
 }
 
 
-# Keep only genes detected as expressed in the ovary.
-
+# keep only genes expressed in ovary
 go_expressed <- go[
   go$Gene.name %in% expressed_genes,
   ,
@@ -237,43 +176,34 @@ go_expressed <- go[
 ]
 
 
-# ==============================================================================
-# 6. IDENTIFY MEMBRANE / TRANSMEMBRANE PROTEINS
-# ==============================================================================
+# Membrane and transmembrane proteins
+# ------------------------------------------------------------------
 
-# Genes with an annotated transmembrane helix.
-
+# genes with a predicted/annotated transmembrane helix
 genes_TM <- unique(
 
   go_expressed$Gene.name[
     !is.na(go_expressed$Transmembrane.helices) &
-    go_expressed$Transmembrane.helices == "TMhelix"
+      go_expressed$Transmembrane.helices == "TMhelix"
   ]
-
 )
 
 
-# Genes containing "membrane" in their GO annotation.
-
+# genes with "membrane" in a GO term
 genes_membrane <- unique(
 
   go_expressed$Gene.name[
     !is.na(go_expressed$GO.term.name) &
-    grepl(
-      "membrane",
-      go_expressed$GO.term.name,
-      ignore.case = TRUE
-    )
+      grepl(
+        "membrane",
+        go_expressed$GO.term.name,
+        ignore.case = TRUE
+      )
   ]
-
 )
 
 
-# Main priority set:
-#
-# expressed in ovary AND
-# either transmembrane or membrane-associated.
-
+# main set of membrane/TM candidates
 priority_genes <- unique(
   c(
     genes_TM,
@@ -289,28 +219,23 @@ cat(
 )
 
 
-# ==============================================================================
-# 7. IDENTIFY ADDITIONAL RECEPTOR GENES
-# ==============================================================================
-
-# Find expressed genes with receptor-related GO annotations.
+# Additional receptor genes
+# ------------------------------------------------------------------
 
 genes_receptor <- unique(
 
   go_expressed$Gene.name[
     !is.na(go_expressed$GO.term.name) &
-    grepl(
-      "receptor",
-      go_expressed$GO.term.name,
-      ignore.case = TRUE
-    )
+      grepl(
+        "receptor",
+        go_expressed$GO.term.name,
+        ignore.case = TRUE
+      )
   ]
-
 )
 
 
-# Keep receptors that were NOT already included in the membrane/TM list.
-
+# keep receptors not already in the membrane/TM list
 additional_receptor_genes <- setdiff(
   genes_receptor,
   priority_genes
@@ -324,12 +249,11 @@ cat(
 )
 
 
-# ==============================================================================
-# 8. LOAD DROSOPHILA PROTEOME
-# ==============================================================================
+# ------------------------------------------------------------------
+# Drosophila proteome
+# ------------------------------------------------------------------
 
-# The FASTA contains protein sequences, therefore AAStringSet is used.
-
+# protein FASTA, so use AAStringSet
 proteome <- readAAStringSet(
   PROTEOME_FASTA
 )
@@ -347,12 +271,10 @@ cat(
 )
 
 
-# ==============================================================================
-# 9. HELPER FUNCTIONS FOR FASTA HEADER PARSING
-# ==============================================================================
+# Parse FASTA headers
+# ------------------------------------------------------------------
 
-# Extract everything after a particular annotation tag.
-
+# extract everything after a tag
 extract_after_tag <- function(x, tag) {
 
   vapply(
@@ -366,11 +288,8 @@ extract_after_tag <- function(x, tag) {
     function(parts) {
 
       if (length(parts) >= 2) {
-
         parts[2]
-
       } else {
-
         NA_character_
       }
     },
@@ -380,14 +299,7 @@ extract_after_tag <- function(x, tag) {
 }
 
 
-# Extract the first identifier following a particular tag.
-#
-# Annotation entries in the FASTA headers may be separated by:
-#
-#   ;
-#   ,
-#   whitespace
-
+# get the first identifier after a tag
 extract_identifier <- function(x, tag) {
 
   value <- extract_after_tag(
@@ -414,25 +326,15 @@ extract_identifier <- function(x, tag) {
 }
 
 
-# ==============================================================================
-# 10. PARSE FLYBASE AND UNIPROT ANNOTATIONS
-# ==============================================================================
-
-# Extract FlyBase annotation.
-
+# FlyBase annotation
 flybase_annotation <- extract_identifier(
   protein_headers,
   "FlyBase_Annotation_IDs:"
 )
 
 
-# Remove protein-isoform suffix.
-#
-# Example:
-#
-#   gene-PA -> gene
-#   gene-PB -> gene
-
+# remove protein isoform suffix
+# e.g. gene-PA -> gene
 gene_name <- sub(
   "-P.*$",
   "",
@@ -440,23 +342,17 @@ gene_name <- sub(
 )
 
 
-# Extract reviewed Swiss-Prot identifiers.
-
+# UniProt IDs
 uniprot_swiss <- extract_identifier(
   protein_headers,
   "UniProt/Swiss-Prot:"
 )
-
-
-# Extract TrEMBL identifiers.
 
 uniprot_trembl <- extract_identifier(
   protein_headers,
   "UniProt/TrEMBL:"
 )
 
-
-# Build protein annotation table.
 
 protein_map <- data.frame(
 
@@ -470,14 +366,7 @@ protein_map <- data.frame(
 )
 
 
-# ==============================================================================
-# 11. CREATE A PREFERRED UNIPROT IDENTIFIER
-# ==============================================================================
-
-# Prefer Swiss-Prot when available.
-#
-# If no Swiss-Prot ID exists, use the corresponding TrEMBL ID.
-
+# prefer Swiss-Prot if available, otherwise use TrEMBL
 protein_map$preferred_uniprot <- ifelse(
 
   !is.na(
@@ -487,13 +376,10 @@ protein_map$preferred_uniprot <- ifelse(
   protein_map$uniprot_swiss,
 
   protein_map$uniprot_trembl
-
 )
 
-
-# ==============================================================================
-# 12. HELPER FUNCTION: GET ALL UNIPROT IDs FOR A GENE SET
-# ==============================================================================
+# Get UniProt IDs for a set of genes
+# ------------------------------------------------------------------
 
 get_uniprot_ids <- function(genes) {
 
@@ -504,17 +390,16 @@ get_uniprot_ids <- function(genes) {
   ]
 
 
-  # Include both Swiss-Prot and TrEMBL IDs where available.
+  # keep both Swiss-Prot and TrEMBL IDs if available
   ids <- c(
     x$uniprot_swiss,
     x$uniprot_trembl
   )
 
 
-  # Remove missing and empty identifiers.
   ids <- ids[
     !is.na(ids) &
-    ids != ""
+      ids != ""
   ]
 
 
@@ -524,9 +409,8 @@ get_uniprot_ids <- function(genes) {
 }
 
 
-# ==============================================================================
-# 13. UNIPROT IDS FOR MEMBRANE / TM CANDIDATES
-# ==============================================================================
+# Membrane / TM candidates
+# ------------------------------------------------------------------
 
 priority_uniprot <- get_uniprot_ids(
   priority_genes
@@ -546,23 +430,17 @@ cat(
 
 
 write.csv(
-
   priority_output,
-
   file = file.path(
     OUTPUT_DIR,
     "dmel_membrane_expressed_uniprots.csv"
   ),
-
   quote = FALSE,
-
   row.names = FALSE
 )
 
-
-# ==============================================================================
-# 14. UNIPROT IDS FOR ADDITIONAL RECEPTORS
-# ==============================================================================
+# Additional receptor candidates
+# ------------------------------------------------------------------
 
 receptor_uniprot <- get_uniprot_ids(
   additional_receptor_genes
@@ -582,35 +460,26 @@ cat(
 
 
 write.csv(
-
   receptor_output,
-
   file = file.path(
     OUTPUT_DIR,
     "dmel_additional_receptors.csv"
   ),
-
   quote = FALSE,
-
   row.names = FALSE
 )
 
 
-# ==============================================================================
-# 15. UNIPROT IDS FOR THE COMPLETE DROSOPHILA PROTEOME
-# ==============================================================================
 
-# For the complete proteome:
-#
-#   Swiss-Prot is preferred when available.
-#   Otherwise, TrEMBL is used.
+# one preferred UniProt ID per protein:
+# Swiss-Prot first, otherwise TrEMBL
 
 complete_proteome_ids <- unique(
   protein_map$preferred_uniprot[
     !is.na(
       protein_map$preferred_uniprot
     ) &
-    protein_map$preferred_uniprot != ""
+      protein_map$preferred_uniprot != ""
   ]
 )
 
@@ -628,27 +497,19 @@ cat(
 
 
 write.csv(
-
   complete_proteome_output,
-
   file = file.path(
     OUTPUT_DIR,
     "filtered_proteome_dmel.csv"
   ),
-
   quote = FALSE,
-
   row.names = FALSE
 )
 
 
-# ==============================================================================
-# 16. SUMMARY
-# ==============================================================================
 
 cat("\n")
 cat("Analysis complete\n")
-cat("-----------------\n")
 
 cat(
   "Ovary-expressed genes:",
@@ -685,8 +546,3 @@ cat(
   length(complete_proteome_ids),
   "\n"
 )
-
-
-# ==============================================================================
-# End of script
-# ==============================================================================
