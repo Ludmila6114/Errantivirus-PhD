@@ -1,28 +1,13 @@
-# ==============================================================================
-# RepeatMasker and Roo transposable-element analysis
-# ==============================================================================
+# RepeatMasker / Roo analysis
 #
-# This script:
-#
-#   1. Reads RepeatMasker annotations from the OSC genome
-#   2. Calculates the percentage of each TE consensus represented by each hit
-#   3. Identifies Roo insertions
-#   4. Tests whether genomic regions around Roo insertions overlap other TEs
-#   5. Compares TE copy numbers between the OSC genome and dm6
-#   6. Examines Roo nucleotide composition in 50-bp windows
-#   7. Extracts Roo insertion coordinates and sequences
-#   8. Generates BED files
-#   9. Summarises sequencing reads mapping to Roo insertion loci
-#
-# IMPORTANT:
-# No local filesystem paths are stored in this public version.
-# Set the paths below before running the analysis.
-# ==============================================================================
+# Main steps:
+# - find Roo and other TE copies in the OSC genome
+# - compare TE copy number between OSCs and dm6
+# - look at TEs around Roo insertions
+# - check Roo sequence composition
+# - extract Roo coordinates/sequences
+# - compare reads mapping to Roo insertion sites
 
-
-# ==============================================================================
-# 1. Packages
-# ==============================================================================
 
 library(Biostrings)
 library(GenomicRanges)
@@ -33,30 +18,19 @@ library(dplyr)
 library(tidyr)
 
 
-# ==============================================================================
-# 2. USER SETTINGS
-# ==============================================================================
-
-# --------------------------------------------------------------------------
-# Replace these placeholders with paths on your own computer/server.
-#
-# Do NOT commit your private paths to GitHub.
-# --------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Input files
+# ------------------------------------------------------------------
 
 OSC_REPEATMASKER_FILE <- "/path/to/OSC_repeatmasker.out"
-
 DM6_REPEATMASKER_FILE <- "/path/to/dm6_repeatmasker.out"
 
 TE_LIBRARY_FILE <- "/path/to/TE_library.fasta"
-
 OSC_GENOME_FILE <- "/path/to/OSC_genome.fasta"
 
 INSERTION_ANALYSIS_DIR <- "/path/to/insertion_analysis"
-
 OUTPUT_DIR <- "/path/to/output"
 
-
-# Create output directory if it does not already exist.
 
 dir.create(
   OUTPUT_DIR,
@@ -65,53 +39,35 @@ dir.create(
 )
 
 
-# ==============================================================================
-# 3. ANALYSIS PARAMETERS
-# ==============================================================================
-
-# TE of primary interest.
-
+# analysis settings
 TARGET_TE <- "roo"
 
-
-# Minimum percentage of TE consensus sequence represented by a RepeatMasker hit.
-#
-# The original OSC analysis used 40%.
-
+# keep OSC RepeatMasker hits covering at least 40% of the TE consensus
 OSC_MIN_PERCENT <- 40
 
-
-# Threshold used to define approximately full-length TE copies.
-
+# use 90% as the cutoff for approximately full-length elements
 FULL_LENGTH_PERCENT <- 90
 
-
-# Number of bp surrounding each Roo insertion used for overlap analysis.
-
+# region around Roo insertions used for overlap analysis
 FLANK_SIZE <- 5000
 
-
-# Window size for nucleotide-composition analysis.
-
+# window size for Roo sequence composition
 SEQUENCE_WINDOW <- 50
 
 
-# ==============================================================================
-# 4. READ TE CONSENSUS LIBRARY
-# ==============================================================================
+# ------------------------------------------------------------------
+# TE library
+# ------------------------------------------------------------------
 
 TE_library <- readDNAStringSet(
   TE_LIBRARY_FILE
 )
 
 
-# Check that the target TE exists.
-
 if (!TARGET_TE %in% names(TE_library)) {
 
   stop(
     paste(
-      "TE",
       TARGET_TE,
       "was not found in the TE library."
     )
@@ -119,14 +75,11 @@ if (!TARGET_TE %in% names(TE_library)) {
 }
 
 
-# ==============================================================================
-# 5. HELPER FUNCTION FOR REPEATMASKER OUTPUT
-# ==============================================================================
+# ------------------------------------------------------------------
+# Read RepeatMasker output
+# ------------------------------------------------------------------
 
 read_repeatmasker <- function(path) {
-
-  # RepeatMasker .out files normally contain header rows.
-  # This reproduces the structure used in the original analysis.
 
   RM <- read.table(
     path,
@@ -135,8 +88,7 @@ read_repeatmasker <- function(path) {
   )
 
 
-  # Remove the first two non-data rows.
-
+  # first two rows are RepeatMasker headers
   if (nrow(RM) >= 3) {
 
     RM <- RM[
@@ -144,37 +96,31 @@ read_repeatmasker <- function(path) {
       ,
       drop = FALSE
     ]
-
   }
 
 
-  # Remove incomplete rows.
+  RM <- na.omit(
+    RM
+  )
 
-  RM <- na.omit(RM)
 
-
-  return(RM)
+  return(
+    RM
+  )
 }
 
 
-# ==============================================================================
-# 6. REPEATMASKER ANALYSIS — OSC GENOME
-# ==============================================================================
+# ------------------------------------------------------------------
+# OSC RepeatMasker data
+# ------------------------------------------------------------------
 
 RM_OSC <- read_repeatmasker(
   OSC_REPEATMASKER_FILE
 )
 
 
-# ------------------------------------------------------------------------------
-# Determine TE consensus length
-# ------------------------------------------------------------------------------
-
-# RepeatMasker column V10 contains the TE family name.
-#
-# Match each RepeatMasker hit to the corresponding sequence in the
-# TE consensus library.
-
+# V10 contains the TE name
+# match each hit to the corresponding TE consensus length
 RM_OSC$TE_length <- width(TE_library)[
   match(
     as.character(RM_OSC$V10),
@@ -183,8 +129,7 @@ RM_OSC$TE_length <- width(TE_library)[
 ]
 
 
-# Remove RepeatMasker hits whose TE is absent from the TE library.
-
+# remove elements that are not present in the TE library
 RM_OSC <- RM_OSC[
   !is.na(RM_OSC$TE_length),
   ,
@@ -192,16 +137,14 @@ RM_OSC <- RM_OSC[
 ]
 
 
-# ------------------------------------------------------------------------------
-# Calculate percentage of TE consensus represented by each hit
-# ------------------------------------------------------------------------------
-
+# length of each RepeatMasker hit
 RM_OSC$range <- (
   as.numeric(as.character(RM_OSC$V7)) -
   as.numeric(as.character(RM_OSC$V6))
 )
 
 
+# fraction of the TE consensus represented by the hit
 RM_OSC$percent <- (
   RM_OSC$range /
   RM_OSC$TE_length *
@@ -209,8 +152,7 @@ RM_OSC$percent <- (
 )
 
 
-# Keep hits covering at least the requested fraction of the TE consensus.
-
+# keep reasonably complete TE copies
 RM_OSC <- RM_OSC[
   RM_OSC$percent >= OSC_MIN_PERCENT,
   ,
@@ -218,9 +160,9 @@ RM_OSC <- RM_OSC[
 ]
 
 
-# ==============================================================================
-# 7. EXTRACT ROO REPEATMASKER HITS
-# ==============================================================================
+# ------------------------------------------------------------------
+# Roo insertions
+# ------------------------------------------------------------------
 
 roo <- RM_OSC[
   RM_OSC$V10 == TARGET_TE,
@@ -238,8 +180,6 @@ cat(
 )
 
 
-# Save the RepeatMasker records.
-
 write.table(
   roo,
   file = file.path(
@@ -251,16 +191,16 @@ write.table(
 )
 
 
-# ==============================================================================
-# 8. TE COPY-NUMBER SUMMARY IN OSC GENOME
-# ==============================================================================
+# ------------------------------------------------------------------
+# TE abundance in OSC genome
+# ------------------------------------------------------------------
 
 TEs_OSC <- data.frame(
-  table(RM_OSC$V10)
+  table(
+    RM_OSC$V10
+  )
 )
 
-
-# Sort from most abundant to least abundant.
 
 TEs_OSC <- TEs_OSC[
   order(
@@ -270,27 +210,22 @@ TEs_OSC <- TEs_OSC[
 ]
 
 
-# Plot TE abundance.
-
 ggplot(
-  data = TEs_OSC,
+  TEs_OSC,
   aes(
     x = reorder(Var1, Freq),
     y = Freq
   )
 ) +
-
   geom_bar(
     stat = "identity",
     fill = "red"
   ) +
-
   coord_flip() +
-
   theme_bw() +
-
-  xlab("TE name") +
-
+  xlab(
+    "TE name"
+  ) +
   ylab(
     paste0(
       "Number of copies with at least ",
@@ -298,21 +233,19 @@ ggplot(
       "% length"
     )
   ) +
-
   theme(
     text = element_text(
       size = 12
     )
   ) +
-
   ggtitle(
-    "OSC genome — TE statistics"
+    "OSC genome - TE statistics"
   )
 
 
-# ==============================================================================
-# 9. CREATE GENOMICRANGES FOR ROO
-# ==============================================================================
+# ------------------------------------------------------------------
+# Roo GRanges
+# ------------------------------------------------------------------
 
 Roo_GR <- GRanges(
 
@@ -329,7 +262,6 @@ Roo_GR <- GRanges(
     end = as.numeric(
       as.character(roo$V7)
     )
-
   ),
 
   strand = ifelse(
@@ -346,8 +278,7 @@ Roo_GR <- GRanges(
 )
 
 
-# Keep approximately full-length Roo copies.
-
+# keep approximately full-length Roo copies
 Roo_GR <- Roo_GR[
   Roo_GR$percent > FULL_LENGTH_PERCENT
 ]
@@ -362,9 +293,9 @@ cat(
 )
 
 
-# ==============================================================================
-# 10. CREATE GENOMICRANGES FOR ALL OTHER TEs
-# ==============================================================================
+# ------------------------------------------------------------------
+# All other TEs
+# ------------------------------------------------------------------
 
 All_TEs <- GRanges(
 
@@ -381,7 +312,6 @@ All_TEs <- GRanges(
     end = as.numeric(
       as.character(RM_OSC$V7)
     )
-
   ),
 
   strand = ifelse(
@@ -398,8 +328,7 @@ All_TEs <- GRanges(
 )
 
 
-# Exclude Roo itself.
-
+# remove Roo itself
 All_TEs <- All_TEs[
   All_TEs$Element != TARGET_TE
 ]
@@ -412,13 +341,12 @@ cat(
 )
 
 
-# ==============================================================================
-# 11. ANALYSE REGIONS SURROUNDING ROO INSERTIONS
-# ==============================================================================
+# ------------------------------------------------------------------
+# Other TEs around Roo insertions
+# ------------------------------------------------------------------
 
-# Create +/- 5-kb regions around the Roo loci.
-#
-# pmax(1, ...) prevents genomic coordinates from becoming negative.
+# make +/- 5 kb regions around Roo insertions
+# pmax() prevents coordinates below 1
 
 Roo_flanks <- GRanges(
 
@@ -438,7 +366,6 @@ Roo_flanks <- GRanges(
       as.numeric(as.character(roo$V7)) +
       FLANK_SIZE
     )
-
   ),
 
   strand = ifelse(
@@ -462,13 +389,10 @@ cat(
 )
 
 
-# Identify Roo regions whose surrounding sequence overlaps another TE.
-
+# Roo regions containing another TE
 Roo_overlap_regions <- subsetByOverlaps(
-
   Roo_flanks,
   All_TEs,
-
   ignore.strand = TRUE
 )
 
@@ -480,23 +404,19 @@ cat(
 )
 
 
-# Interactive inspection in RStudio if desired:
-#
 # View(
 #   as.data.frame(Roo_overlap_regions)
 # )
 
 
-# ==============================================================================
-# 12. REPEATMASKER ANALYSIS — dm6
-# ==============================================================================
+# ------------------------------------------------------------------
+# dm6 RepeatMasker data
+# ------------------------------------------------------------------
 
 RM_dm6 <- read_repeatmasker(
   DM6_REPEATMASKER_FILE
 )
 
-
-# Match RepeatMasker TE names to TE consensus sequences.
 
 RM_dm6$TE_length <- width(TE_library)[
   match(
@@ -506,8 +426,6 @@ RM_dm6$TE_length <- width(TE_library)[
 ]
 
 
-# Remove elements not represented in the TE library.
-
 RM_dm6 <- RM_dm6[
   !is.na(RM_dm6$TE_length),
   ,
@@ -515,15 +433,11 @@ RM_dm6 <- RM_dm6[
 ]
 
 
-# Calculate TE hit length.
-
 RM_dm6$range <- (
   as.numeric(as.character(RM_dm6$V7)) -
   as.numeric(as.character(RM_dm6$V6))
 )
 
-
-# Percentage of TE consensus represented.
 
 RM_dm6$percent <- (
   RM_dm6$range /
@@ -532,8 +446,7 @@ RM_dm6$percent <- (
 )
 
 
-# Keep approximately full-length copies.
-
+# full-length dm6 TE copies
 RM_dm6_full <- RM_dm6[
   RM_dm6$percent >= FULL_LENGTH_PERCENT,
   ,
@@ -548,13 +461,11 @@ TEs_dm6 <- data.frame(
 )
 
 
-# ==============================================================================
-# 13. FULL-LENGTH TE COPY NUMBER IN OSCs
-# ==============================================================================
+# ------------------------------------------------------------------
+# Full-length OSC TE copies
+# ------------------------------------------------------------------
 
-# For the dm6-versus-OSC comparison, use the same 90% cutoff for both genomes.
-#
-# This avoids comparing >=90% dm6 copies against >=40% OSC copies.
+# use the same 90% cutoff for OSCs and dm6 for this comparison
 
 RM_OSC_full <- RM_OSC[
   RM_OSC$percent >= FULL_LENGTH_PERCENT,
@@ -570,9 +481,9 @@ TEs_OSC_full <- data.frame(
 )
 
 
-# ==============================================================================
-# 14. COMPARE TE COPY NUMBER BETWEEN dm6 AND OSC GENOMES
-# ==============================================================================
+# ------------------------------------------------------------------
+# Compare TE copy numbers between dm6 and OSCs
+# ------------------------------------------------------------------
 
 transposon_summary <- data.frame(
 
@@ -588,8 +499,6 @@ transposon_summary <- data.frame(
 )
 
 
-# Add dm6 counts.
-
 transposon_summary$dm6 <- TEs_dm6$Freq[
   match(
     transposon_summary$transposon,
@@ -597,8 +506,6 @@ transposon_summary$dm6 <- TEs_dm6$Freq[
   )
 ]
 
-
-# Add OSC counts.
 
 transposon_summary$OSCs <- TEs_OSC_full$Freq[
   match(
@@ -608,8 +515,7 @@ transposon_summary$OSCs <- TEs_OSC_full$Freq[
 ]
 
 
-# TEs with no detected copies receive a count of zero.
-
+# missing copy numbers = 0
 transposon_summary$dm6[
   is.na(transposon_summary$dm6)
 ] <- 0
@@ -620,8 +526,7 @@ transposon_summary$OSCs[
 ] <- 0
 
 
-# Remove TEs absent from both genomes.
-
+# remove TEs absent from both genomes
 transposon_summary <- transposon_summary[
   transposon_summary$dm6 +
     transposon_summary$OSCs != 0,
@@ -630,10 +535,7 @@ transposon_summary <- transposon_summary[
 ]
 
 
-# ==============================================================================
-# 15. CONVERT COPY-NUMBER TABLE TO LONG FORMAT
-# ==============================================================================
-
+# long format for plotting
 n_TE <- nrow(
   transposon_summary
 )
@@ -658,28 +560,20 @@ df <- data.frame(
 )
 
 
-# ==============================================================================
-# 16. PLOT dm6 VERSUS OSC TE COPY NUMBER
-# ==============================================================================
-
 ggplot(
-  data = df,
+  df,
   aes(
     x = TE_name,
     y = value,
     fill = genome
   )
 ) +
-
   geom_bar(
     stat = "identity",
     position = "dodge"
   ) +
-
   coord_flip() +
-
   theme_bw() +
-
   ggtitle(
     paste0(
       "RepeatMasker\nTEs with at least ",
@@ -687,17 +581,13 @@ ggplot(
       "% length"
     )
   ) +
-
   labs(
     fill = "Genome:"
   ) +
-
   xlab("") +
-
   ylab(
     "Number of full-length copies"
   ) +
-
   theme(
     text = element_text(
       size = 12
@@ -705,11 +595,9 @@ ggplot(
   )
 
 
-# ==============================================================================
-# 17. ROO SEQUENCE COMPOSITION
-# ==============================================================================
-
-# Extract Roo consensus sequence from the TE library.
+# ------------------------------------------------------------------
+# Roo sequence composition
+# ------------------------------------------------------------------
 
 roo_TE <- TE_library[
   names(TE_library) == TARGET_TE
@@ -729,8 +617,7 @@ roo_sequence <- as.character(
 )
 
 
-# Convert sequence into individual nucleotides.
-
+# split Roo sequence into single bases
 roo_bases <- unlist(
   strsplit(
     roo_sequence,
@@ -749,24 +636,14 @@ sequence_df <- data.frame(
 )
 
 
-# Assign each nucleotide to a 50-bp window.
-#
-# ceiling(position / 50) gives:
-#
-#   1–50    -> window 1
-#   51–100  -> window 2
-#   etc.
-
+# 50-bp windows: 1-50, 51-100, ...
 sequence_df$window <- ceiling(
   sequence_df$position /
     SEQUENCE_WINDOW
 )
 
 
-# ==============================================================================
-# 18. CALCULATE A/T/G/C CONTENT PER WINDOW
-# ==============================================================================
-
+# calculate A/T/G/C content in each window
 ATGC <- sequence_df %>%
 
   count(
@@ -797,73 +674,56 @@ ATGC <- sequence_df %>%
   ) %>%
 
   mutate(
-
     percent = (
       n /
       sum(n) *
       100
     )
-
   ) %>%
 
   ungroup()
 
 
-# ==============================================================================
-# 19. PLOT ROO NUCLEOTIDE COMPOSITION
-# ==============================================================================
-
 ggplot(
-  data = ATGC,
+  ATGC,
   aes(
     x = window,
     y = percent,
     color = base
   )
 ) +
-
   geom_line() +
-
   theme_bw() +
-
   theme(
     text = element_text(
       size = 14
     )
   ) +
-
   ggtitle(
     "Roo element sequence composition"
   ) +
-
   xlab(
     paste0(
       SEQUENCE_WINDOW,
       "-bp window number"
     )
   ) +
-
   ylab(
     "Percent"
   ) +
-
   labs(
     color = "Base:"
   )
 
 
-# ==============================================================================
-# 20. EXTRACT ROO INSERTION SEQUENCES FROM OSC GENOME
-# ==============================================================================
-
-# Load OSC genome.
+# ------------------------------------------------------------------
+# Extract Roo sequences from the OSC genome
+# ------------------------------------------------------------------
 
 genome_OSC <- readDNAStringSet(
   OSC_GENOME_FILE
 )
 
-
-# Extract genomic sequences corresponding to full-length Roo insertions.
 
 Roo_GR$sequence <- getSeq(
   genome_OSC,
@@ -871,16 +731,14 @@ Roo_GR$sequence <- getSeq(
 )
 
 
-# Optional inspection:
-#
 # View(
 #   as.data.frame(Roo_GR)
 # )
 
 
-# ==============================================================================
-# 21. WRITE SIMPLE THREE-COLUMN ROO BED FILE
-# ==============================================================================
+# ------------------------------------------------------------------
+# Simple BED file
+# ------------------------------------------------------------------
 
 bed_roo_simple <- as.data.frame(
   Roo_GR
@@ -894,37 +752,24 @@ bed_roo_simple <- bed_roo_simple[
 
 
 write.table(
-
   bed_roo_simple,
-
   file = file.path(
     OUTPUT_DIR,
     "Roo_insertions_simple.bed"
   ),
-
   row.names = FALSE,
   col.names = FALSE,
   quote = FALSE,
-
   sep = "\t"
 )
 
 
-# ==============================================================================
-# 22. CREATE STANDARD BED6 FILE
-# ==============================================================================
+# ------------------------------------------------------------------
+# BED6 file
+# ------------------------------------------------------------------
 
-# BED6 format:
-#
-# chromosome
-# start
-# end
-# name
-# score
-# strand
-#
-# BED coordinates use a 0-based start coordinate.
-# RepeatMasker coordinates are 1-based, therefore start - 1 is used here.
+# BED uses a 0-based start coordinate,
+# so RepeatMasker start is converted with start - 1
 
 roo_start <- as.numeric(
   as.character(
@@ -968,33 +813,23 @@ my_bed <- data.frame(
 
 
 write.table(
-
   my_bed,
-
   file = file.path(
     OUTPUT_DIR,
     "Roo_insertions.bed"
   ),
-
   row.names = FALSE,
-
   col.names = FALSE,
-
   quote = FALSE,
-
   sep = "\t"
 )
 
 
-# ==============================================================================
-# 23. ROO INSERTION IDENTIFICATION FROM ALIGNMENT FILES
-# ==============================================================================
+# ------------------------------------------------------------------
+# Roo insertion mapping
+# ------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# Helper function:
-# safely combine scanBam output into a data frame
-# ------------------------------------------------------------------------------
-
+# scanBam() returns lists; this keeps factor levels intact
 .unlist <- function(x) {
 
   x1 <- x[[1L]]
@@ -1013,15 +848,11 @@ write.table(
       c,
       x
     )
-
   }
 }
 
 
-# ------------------------------------------------------------------------------
-# Convert BAM alignment into data frame
-# ------------------------------------------------------------------------------
-
+# convert BAM alignment to a data frame
 bam_to_df <- function(path) {
 
   bam <- scanBam(
@@ -1047,7 +878,6 @@ bam_to_df <- function(path) {
           y
         )
       )
-
     }
   )
 
@@ -1063,26 +893,14 @@ bam_to_df <- function(path) {
   ) <- bam_field
 
 
-  bam_df <- data.frame(
-    bam_df
-  )
-
-
-  return(
+  data.frame(
     bam_df
   )
 }
 
 
-# ==============================================================================
-# 24. ALIGNMENT FILE LOCATIONS
-# ==============================================================================
-
-# Change filenames here if required.
-#
-# NOTE:
-# scanBam() expects BAM-format input.
-# If these files are plain-text SAM files, convert them to BAM first.
+# scanBam() expects BAM-format input
+# change filenames here if needed
 
 GFP4_FILE <- file.path(
   INSERTION_ANALYSIS_DIR,
@@ -1096,17 +914,16 @@ MAEL4_FILE <- file.path(
 )
 
 
-# ==============================================================================
-# 25. GFP4
-# ==============================================================================
+# ------------------------------------------------------------------
+# GFP4
+# ------------------------------------------------------------------
 
 GFP4 <- bam_to_df(
   GFP4_FILE
 )
 
 
-# Extract read count encoded after "=" in the read name.
-
+# read abundance is stored after "=" in the read name
 GFP4$count <- vapply(
 
   strsplit(
@@ -1124,9 +941,7 @@ GFP4$count <- vapply(
     } else {
 
       NA_character_
-
     }
-
   },
 
   character(1)
@@ -1138,8 +953,7 @@ GFP4$count <- as.numeric(
 )
 
 
-# Sum read counts for each Roo insertion.
-
+# total reads for each Roo insertion
 GFP4_summary <- GFP4 %>%
 
   group_by(
@@ -1147,19 +961,17 @@ GFP4_summary <- GFP4 %>%
   ) %>%
 
   summarise(
-
     Freq = sum(
       count,
       na.rm = TRUE
     ),
-
     .groups = "drop"
   )
 
 
-# ==============================================================================
-# 26. MAEL4
-# ==============================================================================
+# ------------------------------------------------------------------
+# Mael4
+# ------------------------------------------------------------------
 
 Mael4 <- bam_to_df(
   MAEL4_FILE
@@ -1183,9 +995,7 @@ Mael4$count <- vapply(
     } else {
 
       NA_character_
-
     }
-
   },
 
   character(1)
@@ -1204,19 +1014,17 @@ Mael4_summary <- Mael4 %>%
   ) %>%
 
   summarise(
-
     Freq = sum(
       count,
       na.rm = TRUE
     ),
-
     .groups = "drop"
   )
 
 
-# ==============================================================================
-# 27. IDENTIFY ROO INSERTIONS PRESENT IN MAEL4 BUT NOT GFP4
-# ==============================================================================
+# ------------------------------------------------------------------
+# Roo insertions found in Mael4 but not GFP4
+# ------------------------------------------------------------------
 
 Mael4_specific_insertions <- unique(
 
@@ -1224,7 +1032,6 @@ Mael4_specific_insertions <- unique(
     !Mael4_summary$rname %in%
       GFP4_summary$rname,
   ]$rname
-
 )
 
 
@@ -1233,61 +1040,41 @@ print(
 )
 
 
-# ==============================================================================
-# 28. SAVE SUMMARY TABLES
-# ==============================================================================
+# ------------------------------------------------------------------
+# Save summary tables
+# ------------------------------------------------------------------
 
 write.table(
-
   transposon_summary,
-
   file = file.path(
     OUTPUT_DIR,
     "TE_copy_number_dm6_vs_OSC.tsv"
   ),
-
   sep = "\t",
-
   row.names = FALSE,
-
   quote = FALSE
 )
 
 
 write.table(
-
   GFP4_summary,
-
   file = file.path(
     OUTPUT_DIR,
     "GFP4_Roo_insertions.tsv"
   ),
-
   sep = "\t",
-
   row.names = FALSE,
-
   quote = FALSE
 )
 
 
 write.table(
-
   Mael4_summary,
-
   file = file.path(
     OUTPUT_DIR,
     "Mael4_Roo_insertions.tsv"
   ),
-
   sep = "\t",
-
   row.names = FALSE,
-
   quote = FALSE
 )
-
-
-# ==============================================================================
-# End of analysis
-# ==============================================================================
